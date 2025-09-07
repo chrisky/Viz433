@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Multi‑Timeline Visualiser</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; background:#0d0f13; color:#dfe6ef; }
+    header { padding:16px 20px; border-bottom:1px solid #202430; position:sticky; top:0; backdrop-filter:saturate(1.2) blur(6px); background:rgba(13,15,19,0.8); z-index:2; }
+    h1 { font-size:18px; margin:0 0 8px; }
+    .container { display:grid; grid-template-columns: 420px 1fr; gap:0; min-height:100vh; }
+    .sidebar { border-right:1px solid #202430; height:calc(100vh - 66px); overflow:auto; padding:14px 16px; }
+    .controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .btn { background:#2a3142; border:1px solid #3a4357; padding:8px 10px; border-radius:10px; cursor:pointer; color:#cfe0ff; font-weight:600; }
+    .btn:hover { background:#334059; }
+    .btn.secondary { background:#1b2030; color:#b9c4d6; }
+    .row { border:1px solid #202430; background:#11141b; border-radius:12px; padding:10px; margin:10px 0; }
+    .row h3 { margin:0 0 8px; font-size:14px; display:flex; align-items:center; justify-content:space-between; }
+    label { font-size:12px; color:#98a3b7; display:block; margin:6px 0 4px; }
+    input[type="text"], input[type="number"], textarea { width:100%; padding:8px; border-radius:10px; border:1px solid #2a3142; background:#0f1218; color:#e6edf7; resize:vertical; }
+    textarea { min-height:84px; }
+    .hint { font-size:11px; color:#8c96a9; margin-top:6px; }
+    .canvas-wrap { position:relative; height:calc(100vh - 66px); }
+    canvas { width:100%; height:100%; display:block; }
+    .legend { position:absolute; right:12px; top:12px; font-size:12px; background:rgba(17,20,27,0.8); border:1px solid #242b3a; padding:8px 10px; border-radius:10px; pointer-events:none; }
+    .footer { font-size:12px; color:#8c96a9; margin-top:6px; }
+    .kbd { display:inline-block; padding:2px 6px; border:1px solid #3a4357; border-bottom-width:2px; border-radius:6px; background:#0e1220; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11px; }
+    .pill { display:inline-block; padding:2px 6px; border-radius:999px; border:1px solid #3a4357; background:#111828; font-size:11px; }
+  </style>
+  <!-- Paper.js -->
+  <script src="https://unpkg.com/paper@0.12.18/dist/paper-full.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Multi‑Timeline Visualiser</h1>
+    <div class="controls">
+      <button class="btn" id="addTrack">Add timeline</button>
+      <button class="btn" id="render">Render</button>
+      <button class="btn secondary" id="resetView" title="Reset pan & zoom">Reset View</button>
+      <span class="pill" id="zoomInfo">Zoom: 100%</span>
+      <span class="pill" id="unitInfo">Scale: 50 px / unit</span>
+    </div>
+  </header>
+
+  <div class="container">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main>
+      <div class="canvas-wrap">
+        <canvas id="stage" resize></canvas>
+        <div class="legend" id="legend"></div>
+      </div>
+    </main>
+  </div>
+
+<script>
+(function(){
+  // ---------- UI state ----------
+  const sidebar = document.getElementById('sidebar');
+  const addBtn = document.getElementById('addTrack');
+  const renderBtn = document.getElementById('render');
+  const resetBtn = document.getElementById('resetView');
+  const zoomInfo = document.getElementById('zoomInfo');
+  const unitInfo = document.getElementById('unitInfo');
+  const legend = document.getElementById('legend');
+
+  // Global draw config
+  const ROW_HEIGHT = 60;         // vertical space per timeline row
+  const ROW_GAP = 24;            // gap between rows
+  const BASE_PX_PER_UNIT = 50;   // world units to pixels at zoom=1
+  const COLORS = [
+    '#7bdff2', '#b2f7ef', '#eff7f6', '#f7d6e0', '#f2b5d4',
+    '#82f6a5', '#b5e48c', '#f9c74f', '#f8961e', '#f9844a', '#90be6d'
+  ];
+
+  // Track model { id, name, offset, dataText }
+  let tracks = [];
+  let trackCounter = 1;
+
+  function addTrackRow(prefill) {
+    const id = `track-${trackCounter++}`;
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.dataset.id = id;
+
+    row.innerHTML = `
+      <h3>
+        <span>Timeline <span class="pill">#${tracks.length+1}</span></span>
+        <button class="btn secondary" data-remove>Remove</button>
+      </h3>
+      <label>Name</label>
+      <input type="text" data-name placeholder="e.g., Dataset A" value="${prefill?.name || ''}">
+      <div style="display:grid; grid-template-columns: 1fr 140px; gap:10px; align-items:end;">
+        <div>
+          <label>Numbers (timespans)</label>
+          <textarea data-text placeholder="Paste numbers separated by spaces, commas, or newlines">${prefill?.dataText || ''}</textarea>
+          <div class="hint">Examples: <code>5 2 3.5 1</code> or <code>5,2,3.5,1</code>. Each number is a span length; rectangles are laid end‑to‑end. Markers at cumulative boundaries.</div>
+        </div>
+        <div>
+          <label>Offset (units)</label>
+          <input type="number" step="any" data-offset value="${prefill?.offset ?? 0}">
+        </div>
+      </div>
+    `;
+
+    row.querySelector('[data-remove]').onclick = () => {
+      sidebar.removeChild(row);
+      tracks = tracks.filter(t => t.id !== id);
+      reindexHeaders();
+      draw();
+    };
+
+    sidebar.appendChild(row);
+
+    // Insert into model
+    tracks.push({ id, name:'', offset:0, dataText:'' });
+
+    // Bind changes to model
+    const nameEl = row.querySelector('[data-name]');
+    const textEl = row.querySelector('[data-text]');
+    const offEl  = row.querySelector('[data-offset]');
+
+    function sync() {
+      const t = tracks.find(t => t.id === id);
+      t.name = nameEl.value.trim();
+      t.dataText = textEl.value;
+      t.offset = parseFloat(offEl.value || '0') || 0;
+    }
+    nameEl.addEventListener('input', sync);
+    textEl.addEventListener('input', sync);
+    offEl.addEventListener('input', sync);
+
+    sync();
+  }
+
+  function reindexHeaders(){
+    [...sidebar.querySelectorAll('.row h3 span .pill')].forEach((el,i)=> el.textContent = `#${i+1}`);
+  }
+
+  // Seed with two demo timelines
+  addTrackRow({ name:'Dataset A', dataText:'5 2 3.5 1 4 2.2 6', offset:0 });
+  addTrackRow({ name:'Dataset B', dataText:'2 2 2 2 2 2 2 2 2 2 2', offset:1.5 });
+
+  addBtn.onclick = () => addTrackRow();
+  renderBtn.onclick = () => { draw(); };
+  resetBtn.onclick = () => { resetView(); draw(); };
+
+  // ---------- Paper.js setup ----------
+  paper.setup('stage');
+  const view = paper.view;
+
+  // World <-> screen scale baseline
+  let pxPerUnit = BASE_PX_PER_UNIT; // used for axis label spacing computations; visual zoom uses view.zoom
+
+  // Root layers
+  const gridLayer = new paper.Layer();
+  const dataLayer = new paper.Layer();
+  const overlayLayer = new paper.Layer();
+
+  // Panning / zoom
+  let panning = false; let panStart = null;
+  const minZoom = 0.15, maxZoom = 6;
+
+  function setZoom(z){
+    view.zoom = Math.max(minZoom, Math.min(maxZoom, z));
+    zoomInfo.textContent = `Zoom: ${Math.round(view.zoom*100)}%`;
+  }
+
+  function resetView(){
+    view.center = new paper.Point(view.bounds.width/2, view.bounds.height/2);
+    setZoom(1);
+  }
+  resetView();
+
+  // Wheel zoom around cursor
+  view.element.addEventListener('wheel', (evt) => {
+    evt.preventDefault();
+    const old = view.zoom;
+    const mouse = new paper.Point(evt.offsetX, evt.offsetY);
+    const worldBefore = view.viewToProject(mouse);
+
+    const factor = Math.pow(1.0016, -evt.deltaY);
+    setZoom(old * factor);
+
+    const worldAfter = view.viewToProject(mouse);
+    view.center = view.center.add(worldBefore.subtract(worldAfter));
+  }, { passive:false });
+
+  // Pan: middle mouse OR hold Space + Left drag
+  view.element.addEventListener('mousedown', (e)=>{
+    if (e.button === 1 || (e.button===0 && e.shiftKey) || (e.button===0 && e.metaKey) || (e.button===0 && e.ctrlKey) || (e.button===0 && e.code==='Space')) {
+      panning = true; panStart = new paper.Point(e.clientX, e.clientY); document.body.style.cursor='grabbing';
+    }
+  });
+  window.addEventListener('mousemove', (e)=>{
+    if(!panning) return;
+    const now = new paper.Point(e.clientX, e.clientY);
+    const delta = panStart.subtract(now).divide(view.zoom);
+    view.center = view.center.add(delta);
+    panStart = now;
+  });
+  window.addEventListener('mouseup', ()=>{ panning=false; document.body.style.cursor='default'; });
+
+  // ---------- Parsing & drawing ----------
+  function parseNumbers(text){
+    return (text || '')
+      .split(/[\s,;]+/)
+      .map(s=>s.trim())
+      .filter(s=> s.length>0 && !isNaN(Number(s)))
+      .map(Number);
+  }
+
+  // Nice tick spacing (1,2,5 × 10^n)
+  function niceStep(targetPx){
+    const unitPx = pxPerUnit * view.zoom; // px per world unit at current zoom
+    const targetUnits = targetPx / unitPx;
+    const pow10 = Math.pow(10, Math.floor(Math.log10(targetUnits)));
+    const candidates = [1,2,5].map(m=> m*pow10);
+    // choose the one >= targetUnits
+    const picked = candidates.find(c=> c>= targetUnits) || 10*pow10;
+    return picked;
+  }
+
+  function colorAt(i){ return COLORS[i % COLORS.length]; }
+
+  function drawAxis(bounds){
+    const group = new paper.Group();
+    const { left, right, top } = bounds;
+    const y0 = top + 30; // place axis near top
+
+    // Baseline
+    const baseline = new paper.Path.Line({ from:[left, y0], to:[right, y0], strokeColor:'#2a3244', strokeWidth:1 });
+    group.addChild(baseline);
+
+    // Ticks & labels
+    const step = niceStep(100); // aim ~100px apart
+    const startUnit = Math.floor((left - view.center.x) / (pxPerUnit) * (1/view.zoom)); // not used; we'll compute differently
+
+    // World x range for current view
+    const worldLeft  = view.viewToProject(new paper.Point(0,0)).x;
+    const worldRight = view.viewToProject(new paper.Point(view.bounds.width,0)).x;
+
+    // Choose tick start as multiple of step
+    const firstTick = Math.floor(worldLeft / step) * step;
+    for (let u = firstTick; u <= worldRight; u += step) {
+      const x = u; // world x already (Paper project coords)
+      const p = new paper.Point(x, y0);
+      const t = new paper.Path.Line({ from:[x, y0-6], to:[x, y0+6], strokeColor:'#3a4258', strokeWidth:1 });
+      group.addChild(t);
+      const label = new paper.PointText({ point:[x+3, y0 - 8], content: u.toFixed( (step<1)? 2 : 0), fillColor:'#98a3b7', fontSize:10 });
+      group.addChild(label);
+    }
+
+    return group;
+  }
+
+  function draw(){
+    gridLayer.removeChildren();
+    dataLayer.removeChildren();
+    overlayLayer.removeChildren();
+
+    // Helpful info
+    unitInfo.textContent = `Scale: ${Math.round(pxPerUnit)} px / unit`;
+
+    const viewBounds = view.bounds;
+
+    // Axis
+    const axis = drawAxis(viewBounds);
+    gridLayer.addChild(axis);
+
+    // Draw each track
+    const legendLines = [];
+
+    tracks.forEach((t, idx) => {
+      const nums = parseNumbers(t.dataText);
+      const y = 80 + idx*(ROW_HEIGHT + ROW_GAP);
+
+      // Row baseline & label
+      const name = t.name || `Timeline ${idx+1}`;
+      const nameText = new paper.PointText({ point:[view.viewToProject(new paper.Point(16,0)).x, y-18], content: name, fillColor:'#c7d2e8', fontSize:12 });
+      dataLayer.addChild(nameText);
+
+      // Offset marker
+      const startX = t.offset; // world units
+      const startLine = new paper.Path.Line({ from:[startX, y-10], to:[startX, y+ROW_HEIGHT-10], strokeColor:'#39435c', dashArray:[6,6] });
+      dataLayer.addChild(startLine);
+
+      // Spans
+      let acc = startX;
+      const rects = new paper.Group();
+      const spanColor = colorAt(idx);
+
+      nums.forEach((len, j) => {
+        const x0 = acc;
+        const x1 = acc + len;
+        const r = new paper.Path.Rectangle({
+          point: [x0, y],
+          size: [len, ROW_HEIGHT-20],
+          fillColor: spanColor,
+          opacity: 0.65,
+          strokeColor: 'white',
+          strokeWidth: 0.6
+        });
+        // boundary marker at x1
+        const m = new paper.Path.Line({ from:[x1, y-2], to:[x1, y+ROW_HEIGHT-18], strokeColor:'#e6edf7', opacity:0.35 });
+        rects.addChildren([r,m]);
+        // small length label
+        if (len >= 1.2) {
+          const lbl = new paper.PointText({ point:[x0 + 0.5*len, y + (ROW_HEIGHT-20)/2 + 4], justification:'center', content: String(len), fillColor:'#0d0f13', fontSize:11 });
+          rects.addChild(lbl);
+        }
+        acc = x1;
+      });
+
+      dataLayer.addChild(rects);
+
+      // Left baseline line for the track
+      const base = new paper.Path.Line({ from:[-1e6, y + (ROW_HEIGHT-20)], to:[1e6, y + (ROW_HEIGHT-20)], strokeColor:'#222a3a' });
+      dataLayer.addChild(base);
+
+      legendLines.push(`<div><span class="pill" style="border-color:#3a4357">${name}</span> <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${spanColor};margin:0 6px 0 10px"></span> spans: ${nums.length}</div>`);
+    });
+
+    legend.innerHTML = legendLines.join('');
+
+    view.update();
+  }
+
+  // On resize, redraw (Paper handles canvas resize via resize attr)
+  view.onResize = () => draw();
+
+  // Initial render
+  draw();
+
+})();
+</script>
+
+<footer class="footer" style="padding:8px 16px; border-top:1px solid #202430;">
+  <div>
+    <strong>Tips:</strong>
+    <span class="kbd">Wheel</span> to zoom (around cursor),
+    <span class="kbd">Middle‑drag</span> or <span class="kbd">Shift/Ctrl/⌘ + Drag</span> to pan,
+    <span class="kbd">Reset View</span> if you get lost. Offsets shift track start in same units.
+  </div>
+</footer>
+
+</body>
+</html>
