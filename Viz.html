@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Multi‑Timeline Visualiser</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; background:#0d0f13; color:#dfe6ef; }
+    header { padding:16px 20px; border-bottom:1px solid #202430; position:sticky; top:0; backdrop-filter:saturate(1.2) blur(6px); background:rgba(13,15,19,0.8); z-index:2; }
+    h1 { font-size:18px; margin:0 0 8px; }
+    .container { display:grid; grid-template-columns: 420px 1fr; gap:0; min-height:100vh; }
+    .sidebar { border-right:1px solid #202430; height:calc(100vh - 66px); overflow:auto; padding:14px 16px; }
+    .controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .btn { background:#2a3142; border:1px solid #3a4357; padding:8px 10px; border-radius:10px; cursor:pointer; color:#cfe0ff; font-weight:600; }
+    .btn:hover { background:#334059; }
+    .btn.secondary { background:#1b2030; color:#b9c4d6; }
+    .row { border:1px solid #202430; background:#11141b; border-radius:12px; padding:10px; margin:10px 0; }
+    .row h3 { margin:0 0 8px; font-size:14px; display:flex; align-items:center; justify-content:space-between; }
+    label { font-size:12px; color:#98a3b7; display:block; margin:6px 0 4px; }
+    input[type="text"], input[type="number"], textarea { width:100%; padding:8px; border-radius:10px; border:1px solid #2a3142; background:#0f1218; color:#e6edf7; resize:vertical; }
+    textarea { min-height:84px; }
+    .hint { font-size:11px; color:#8c96a9; margin-top:6px; }
+    .canvas-wrap { position:relative; height:calc(100vh - 66px); }
+    canvas { width:100%; height:100%; display:block; }
+    .legend { position:absolute; right:12px; top:12px; font-size:12px; background:rgba(17,20,27,0.8); border:1px solid #242b3a; padding:8px 10px; border-radius:10px; pointer-events:none; }
+    .footer { font-size:12px; color:#8c96a9; margin-top:6px; }
+    .kbd { display:inline-block; padding:2px 6px; border:1px solid #3a4357; border-bottom-width:2px; border-radius:6px; background:#0e1220; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11px; }
+    .pill { display:inline-block; padding:2px 6px; border-radius:999px; border:1px solid #3a4357; background:#111828; font-size:11px; }
+  </style>
+  <!-- Paper.js -->
+  <script src="https://unpkg.com/paper@0.12.18/dist/paper-full.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Multi‑Timeline Visualiser</h1>
+    <div class="controls">
+      <button class="btn" id="addTrack">Add timeline</button>
+      <button class="btn" id="render">Render</button>
+      <button class="btn secondary" id="resetView" title="Reset pan & zoom">Reset View</button>
+      <span class="pill" id="zoomInfo">Zoom: 100%</span>
+      <span class="pill" id="unitInfo">Scale: 50 px / unit</span>
+    </div>
+  </header>
+
+  <div class="container">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main>
+      <div class="canvas-wrap">
+        <canvas id="stage" resize></canvas>
+        <div class="legend" id="legend"></div>
+      </div>
+    </main>
+  </div>
+
+<script>
+(function(){
+  const sidebar = document.getElementById('sidebar');
+  const addBtn = document.getElementById('addTrack');
+  const renderBtn = document.getElementById('render');
+  const resetBtn = document.getElementById('resetView');
+  const zoomInfo = document.getElementById('zoomInfo');
+  const unitInfo = document.getElementById('unitInfo');
+  const legend = document.getElementById('legend');
+
+  const ROW_HEIGHT = 60;
+  const ROW_GAP = 24;
+  const BASE_PX_PER_UNIT = 50;
+  const COLORS = [ '#7bdff2','#b2f7ef','#eff7f6','#f7d6e0','#f2b5d4','#82f6a5','#b5e48c','#f9c74f','#f8961e','#f9844a','#90be6d' ];
+
+  let tracks = [];
+  let trackCounter = 1;
+
+  function addTrackRow(prefill) {
+    const id = `track-${trackCounter++}`;
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.dataset.id = id;
+    row.innerHTML = `
+      <h3>
+        <span>Timeline <span class="pill">#${tracks.length+1}</span></span>
+        <button class="btn secondary" data-remove>Remove</button>
+      </h3>
+      <label>Name</label>
+      <input type="text" data-name placeholder="e.g., Dataset A" value="${prefill?.name || ''}">
+      <div style="display:grid; grid-template-columns: 1fr 140px; gap:10px; align-items:end;">
+        <div>
+          <label>Numbers (timespans)</label>
+          <textarea data-text>${prefill?.dataText || ''}</textarea>
+        </div>
+        <div>
+          <label>Offset (units)</label>
+          <input type="number" step="any" data-offset value="${prefill?.offset ?? 0}">
+        </div>
+      </div>`;
+    row.querySelector('[data-remove]').onclick = () => { sidebar.removeChild(row); tracks = tracks.filter(t => t.id !== id); reindexHeaders(); draw(); };
+    sidebar.appendChild(row);
+    tracks.push({ id, name:'', offset:0, dataText:'', panY:0 });
+    const nameEl = row.querySelector('[data-name]');
+    const textEl = row.querySelector('[data-text]');
+    const offEl  = row.querySelector('[data-offset]');
+    function sync(){ const t = tracks.find(t => t.id === id); t.name=nameEl.value.trim(); t.dataText=textEl.value; t.offset=parseFloat(offEl.value||'0')||0; }
+    nameEl.addEventListener('input', sync); textEl.addEventListener('input', sync); offEl.addEventListener('input', sync); sync();
+  }
+  function reindexHeaders(){ [...sidebar.querySelectorAll('.row h3 span .pill')].forEach((el,i)=> el.textContent = `#${i+1}`); }
+
+  addTrackRow({ name:'Dataset A', dataText:'5 2 3.5 1 4 2.2 6', offset:0 });
+  addTrackRow({ name:'Dataset B', dataText:'2 2 2 2 2 2 2 2 2 2 2', offset:1.5 });
+  addBtn.onclick = () => addTrackRow();
+  renderBtn.onclick = () => draw();
+  resetBtn.onclick = () => { resetView(); draw(); };
+
+  paper.setup('stage');
+  const view = paper.view;
+  let pxPerUnit = BASE_PX_PER_UNIT;
+  let panX = 100;
+  let minScale = 0.0005, maxScale = 800;
+
+  const worldXToScreen = (wx) => panX + wx * pxPerUnit;
+  const screenXToWorld = (sx) => (sx - panX) / pxPerUnit;
+
+  function setScale(v){ pxPerUnit = Math.max(minScale, Math.min(maxScale, v)); zoomInfo.textContent = `Zoom: ${Math.round(pxPerUnit/BASE_PX_PER_UNIT*100)}%`; unitInfo.textContent = `Scale: ${pxPerUnit.toFixed(5)} px / unit`; }
+  function resetView(){ setScale(BASE_PX_PER_UNIT); panX=100; tracks.forEach(t=>t.panY=0); }
+  resetView();
+
+  view.element.addEventListener('wheel', (evt) => { evt.preventDefault(); const mouseX=evt.offsetX; const worldXBefore=screenXToWorld(mouseX); const factor=Math.pow(1.0016,-evt.deltaY); setScale(pxPerUnit*factor); panX = mouseX - worldXBefore*pxPerUnit; draw(); }, { passive:false });
+
+  // Per-track dragging (horizontal + vertical)
+  // Left-drag inside a row moves that row: X adjusts offset (world units), Y adjusts per-row panY
+  let draggingTrack=null; // { t, startSX, startSY, startOffset, startPanY }
+  view.element.addEventListener('mousedown',(e)=>{
+    if(e.button!==0) return; // left only
+    const sx=e.offsetX, sy=e.offsetY;
+    // find row under cursor
+    for(let idx=0; idx<tracks.length; idx++){
+      const t=tracks[idx];
+      const baseY=80 + idx*(ROW_HEIGHT+ROW_GAP) + t.panY;
+      if(sy>=baseY && sy<=baseY+ROW_HEIGHT){
+        draggingTrack={ t, startSX:sx, startSY:sy, startOffset:t.offset, startPanY:t.panY };
+        document.body.style.cursor='move';
+        break;
+      }
+    }
+  });
+  view.element.addEventListener('mousemove',(e)=>{
+    if(!draggingTrack) return;
+    const dx = e.offsetX - draggingTrack.startSX;
+    const dy = e.offsetY - draggingTrack.startSY;
+    // Horizontal: convert screen-px to world units for offset
+    draggingTrack.t.offset = draggingTrack.startOffset + dx / pxPerUnit;
+    // Vertical: pixel pan per row
+    draggingTrack.t.panY = draggingTrack.startPanY + dy;
+    draw();
+  });
+  window.addEventListener('mouseup',()=>{ if(draggingTrack){ draggingTrack=null; document.body.style.cursor='default'; } });
+
+  function parseNumbers(text){ return (text||'').split(/[\s,;]+/).map(s=>s.trim()).filter(s=>s.length>0 && !isNaN(Number(s))).map(Number); }
+  function niceStep(targetPx){ const targetUnits=targetPx/pxPerUnit; const pow10=Math.pow(10,Math.floor(Math.log10(Math.max(targetUnits,1e-9)))); const cand=[1,2,5].map(m=>m*pow10); return cand.find(c=>c>=targetUnits)||10*pow10; }
+
+  function drawAxis(){ const g=new paper.Group(); const y0=30; g.addChild(new paper.Path.Line({from:[0,y0],to:[view.bounds.width,y0],strokeColor:'#2a3244',strokeWidth:1})); const worldLeft=screenXToWorld(0); const worldRight=screenXToWorld(view.bounds.width); const step=niceStep(100); const firstTick=Math.floor(worldLeft/step)*step; for(let u=firstTick;u<=worldRight;u+=step){ const sx=worldXToScreen(u); g.addChild(new paper.Path.Line({from:[sx,y0-6],to:[sx,y0+6],strokeColor:'#3a4258',strokeWidth:1})); g.addChild(new paper.PointText({point:[sx+3,y0-8],content:u.toFixed(step<1?2:0),fillColor:'#98a3b7',fontSize:10})); } return g; }
+
+  function draw(){ paper.project.clear(); const gridLayer=new paper.Layer(); const dataLayer=new paper.Layer(); gridLayer.addChild(drawAxis()); const legendLines=[]; tracks.forEach((t,idx)=>{ const nums=parseNumbers(t.dataText); const baseY=80+idx*(ROW_HEIGHT+ROW_GAP)+t.panY; const name=t.name||`Timeline ${idx+1}`; dataLayer.addChild(new paper.PointText({point:[16,baseY-18],content:name,fillColor:'#c7d2e8',fontSize:12})); const startXs=worldXToScreen(t.offset); dataLayer.addChild(new paper.Path.Line({from:[startXs,baseY-10],to:[startXs,baseY+ROW_HEIGHT-10],strokeColor:'#39435c',dashArray:[6,6]})); let acc=t.offset; nums.forEach((len,j)=>{ const x0s=worldXToScreen(acc); const x1s=worldXToScreen(acc+len); const width=x1s-x0s; const color=(j%2===0? '#4fc3f7':'#ffb74d'); dataLayer.addChild(new paper.Path.Rectangle({point:[x0s,baseY],size:[width,ROW_HEIGHT-20],fillColor:color,opacity:0.65,strokeColor:'white',strokeWidth:0.6})); dataLayer.addChild(new paper.Path.Line({from:[x1s,baseY-2],to:[x1s,baseY+ROW_HEIGHT-18],strokeColor:'#e6edf7',opacity:0.35})); if(width>=50){ dataLayer.addChild(new paper.PointText({point:[x0s+width/2,baseY+(ROW_HEIGHT-20)/2+4],justification:'center',content:String(len),fillColor:'#0d0f13',fontSize:11})); } acc+=len; }); dataLayer.addChild(new paper.Path.Line({from:[0,baseY+(ROW_HEIGHT-20)],to:[view.bounds.width,baseY+(ROW_HEIGHT-20)],strokeColor:'#222a3a'})); legendLines.push(`<div><span class="pill">${name}</span> spans: ${nums.length}</div>`); }); legend.innerHTML=legendLines.join(''); view.update(); }
+
+  view.onResize=()=>draw();
+  draw();
+})();
+</script>
+
+<footer class="footer" style="padding:8px 16px; border-top:1px solid #202430;">
+  <div>
+    <strong>Tips:</strong>
+    <span class="kbd">Wheel</span> zooms X only (around cursor),
+    <span class="kbd">Drag track</span> moves it left/right (offset) and up/down (vertical alignment),
+    <span class="kbd">Reset View</span> if you get lost.
+  </div>
+</footer>
+
+</body>
+</html>
