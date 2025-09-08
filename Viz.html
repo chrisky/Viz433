@@ -125,21 +125,34 @@
 
   view.element.addEventListener('wheel', (evt) => { evt.preventDefault(); const mouseX=evt.offsetX; const worldXBefore=screenXToWorld(mouseX); const factor=Math.pow(1.0016,-evt.deltaY); setScale(pxPerUnit*factor); panX = mouseX - worldXBefore*pxPerUnit; draw(); }, { passive:false });
 
-  // Per-track dragging (vertical)
-  let draggingTrack=null; let dragStartY=0;
+  // Per-track dragging (horizontal + vertical)
+  // Left-drag inside a row moves that row: X adjusts offset (world units), Y adjusts per-row panY
+  let draggingTrack=null; // { t, startSX, startSY, startOffset, startPanY }
   view.element.addEventListener('mousedown',(e)=>{
-    if(e.button===0){ // left button
-      const y=e.offsetY; // find track index by vertical slot
-      tracks.forEach((t,idx)=>{
-        const ty = 80 + idx*(ROW_HEIGHT+ROW_GAP) + t.panY;
-        if(y>=ty && y<=ty+ROW_HEIGHT){ draggingTrack=t; dragStartY=y - t.panY; }
-      });
+    if(e.button!==0) return; // left only
+    const sx=e.offsetX, sy=e.offsetY;
+    // find row under cursor
+    for(let idx=0; idx<tracks.length; idx++){
+      const t=tracks[idx];
+      const baseY=80 + idx*(ROW_HEIGHT+ROW_GAP) + t.panY;
+      if(sy>=baseY && sy<=baseY+ROW_HEIGHT){
+        draggingTrack={ t, startSX:sx, startSY:sy, startOffset:t.offset, startPanY:t.panY };
+        document.body.style.cursor='move';
+        break;
+      }
     }
   });
   view.element.addEventListener('mousemove',(e)=>{
-    if(draggingTrack){ draggingTrack.panY = e.offsetY - dragStartY; draw(); }
+    if(!draggingTrack) return;
+    const dx = e.offsetX - draggingTrack.startSX;
+    const dy = e.offsetY - draggingTrack.startSY;
+    // Horizontal: convert screen-px to world units for offset
+    draggingTrack.t.offset = draggingTrack.startOffset + dx / pxPerUnit;
+    // Vertical: pixel pan per row
+    draggingTrack.t.panY = draggingTrack.startPanY + dy;
+    draw();
   });
-  window.addEventListener('mouseup',()=>{ draggingTrack=null; });
+  window.addEventListener('mouseup',()=>{ if(draggingTrack){ draggingTrack=null; document.body.style.cursor='default'; } });
 
   function parseNumbers(text){ return (text||'').split(/[\s,;]+/).map(s=>s.trim()).filter(s=>s.length>0 && !isNaN(Number(s))).map(Number); }
   function niceStep(targetPx){ const targetUnits=targetPx/pxPerUnit; const pow10=Math.pow(10,Math.floor(Math.log10(Math.max(targetUnits,1e-9)))); const cand=[1,2,5].map(m=>m*pow10); return cand.find(c=>c>=targetUnits)||10*pow10; }
@@ -156,8 +169,8 @@
 <footer class="footer" style="padding:8px 16px; border-top:1px solid #202430;">
   <div>
     <strong>Tips:</strong>
-    <span class="kbd">Wheel</span> to zoom horizontally,
-    <span class="kbd">Drag track</span> to move it up/down,
+    <span class="kbd">Wheel</span> zooms X only (around cursor),
+    <span class="kbd">Drag track</span> moves it left/right (offset) and up/down (vertical alignment),
     <span class="kbd">Reset View</span> if you get lost.
   </div>
 </footer>
