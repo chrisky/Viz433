@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Multi‑Timeline Visualiser</title>
+  <title>Multi--Timeline Visualiser</title>
   <style>
     :root { color-scheme: dark; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; background:#0d0f13; color:#dfe6ef; }
@@ -53,9 +53,10 @@
     </main>
   </div>
 
+
 <script>
 (function(){
-  // ---------- UI state ----------
+  // ---------- UI refs ----------
   const sidebar = document.getElementById('sidebar');
   const addBtn = document.getElementById('addTrack');
   const renderBtn = document.getElementById('render');
@@ -64,25 +65,20 @@
   const unitInfo = document.getElementById('unitInfo');
   const legend = document.getElementById('legend');
 
-  // Global draw config
-  const ROW_HEIGHT = 60;         // vertical space per timeline row
-  const ROW_GAP = 24;            // gap between rows
-  const BASE_PX_PER_UNIT = 50;   // world units to pixels at zoom=1
-  const COLORS = [
-    '#7bdff2', '#b2f7ef', '#eff7f6', '#f7d6e0', '#f2b5d4',
-    '#82f6a5', '#b5e48c', '#f9c74f', '#f8961e', '#f9844a', '#90be6d'
-  ];
+  // ---------- Config ----------
+  const ROW_HEIGHT = 60;
+  const ROW_GAP = 24;
+  const BASE_PX_PER_UNIT = 1;
+  const COLORS = ['#7bdff2','#b2f7ef','#eff7f6','#f7d6e0','#f2b5d4','#82f6a5','#b5e48c','#f9c74f','#f8961e','#f9844a','#90be6d'];
 
-  // Track model { id, name, offset, dataText }
+  // ---------- Model ----------
   let tracks = [];
   let trackCounter = 1;
 
   function addTrackRow(prefill) {
     const id = `track-${trackCounter++}`;
     const row = document.createElement('div');
-    row.className = 'row';
-    row.dataset.id = id;
-
+    row.className = 'row'; row.dataset.id = id;
     row.innerHTML = `
       <h3>
         <span>Timeline <span class="pill">#${tracks.length+1}</span></span>
@@ -94,7 +90,7 @@
         <div>
           <label>Numbers (timespans)</label>
           <textarea data-text placeholder="Paste numbers separated by spaces, commas, or newlines">${prefill?.dataText || ''}</textarea>
-          <div class="hint">Examples: <code>5 2 3.5 1</code> or <code>5,2,3.5,1</code>. Each number is a span length; rectangles are laid end‑to‑end. Markers at cumulative boundaries.</div>
+          <div class="hint">Each number is a span length; rectangles are laid end-to-end. Markers at cumulative boundaries.</div>
         </div>
         <div>
           <label>Offset (units)</label>
@@ -102,24 +98,18 @@
         </div>
       </div>
     `;
-
     row.querySelector('[data-remove]').onclick = () => {
       sidebar.removeChild(row);
       tracks = tracks.filter(t => t.id !== id);
-      reindexHeaders();
-      draw();
+      reindexHeaders(); draw();
     };
-
     sidebar.appendChild(row);
 
-    // Insert into model
     tracks.push({ id, name:'', offset:0, dataText:'' });
 
-    // Bind changes to model
     const nameEl = row.querySelector('[data-name]');
     const textEl = row.querySelector('[data-text]');
     const offEl  = row.querySelector('[data-offset]');
-
     function sync() {
       const t = tracks.find(t => t.id === id);
       t.name = nameEl.value.trim();
@@ -129,211 +119,177 @@
     nameEl.addEventListener('input', sync);
     textEl.addEventListener('input', sync);
     offEl.addEventListener('input', sync);
-
     sync();
   }
-
   function reindexHeaders(){
     [...sidebar.querySelectorAll('.row h3 span .pill')].forEach((el,i)=> el.textContent = `#${i+1}`);
   }
 
-  // Seed with two demo timelines
+  // Seed a couple of rows
   addTrackRow({ name:'Dataset A', dataText:'5 2 3.5 1 4 2.2 6', offset:0 });
   addTrackRow({ name:'Dataset B', dataText:'2 2 2 2 2 2 2 2 2 2 2', offset:1.5 });
 
-  addBtn.onclick = () => addTrackRow();
-  renderBtn.onclick = () => { draw(); };
-  resetBtn.onclick = () => { resetView(); draw(); };
+  addBtn.onclick   = () => addTrackRow();
+  renderBtn.onclick = () => draw();
+  resetBtn.onclick  = () => { resetView(); draw(); };
 
-  // ---------- Paper.js setup ----------
+  // ---------- Paper.js ----------
   paper.setup('stage');
   const view = paper.view;
+  view.zoom = 1; // keep fixed; we will scale X ourselves
 
-  // World <-> screen scale baseline
-  let pxPerUnit = BASE_PX_PER_UNIT; // used for axis label spacing computations; visual zoom uses view.zoom
+  // ---------- Camera (X-only zoom) ----------
+  let pxPerUnit = BASE_PX_PER_UNIT; // horizontal scale (px / unit)
+  let panX = 100;                   // pixel pan X
+  let panY = 0;                     // pixel pan Y (vertical stack offset)
+  const minScale = 0.0005, maxScale = 20;
 
-  // Root layers
-  const gridLayer = new paper.Layer();
-  const dataLayer = new paper.Layer();
-  const overlayLayer = new paper.Layer();
+  const worldXToScreen = (wx) => panX + wx * pxPerUnit;
+  const screenXToWorld = (sx) => (sx - panX) / pxPerUnit;
 
-  // Panning / zoom
-  let panning = false; let panStart = null;
-  const minZoom = 0.15, maxZoom = 6;
-
-  function setZoom(z){
-    view.zoom = Math.max(minZoom, Math.min(maxZoom, z));
-    zoomInfo.textContent = `Zoom: ${Math.round(view.zoom*100)}%`;
+  function setScale(v){
+    pxPerUnit = Math.max(minScale, Math.min(maxScale, v));
+    zoomInfo.textContent = `Zoom: ${Math.round(pxPerUnit/BASE_PX_PER_UNIT*100)}%`;
+    unitInfo.textContent = `Scale: ${Math.round(pxPerUnit * 10000)/10000} px / unit`;
   }
-
   function resetView(){
-    view.center = new paper.Point(view.bounds.width/2, view.bounds.height/2);
-    setZoom(1);
+    setScale(BASE_PX_PER_UNIT);
+    panX = 100; panY = 0;
   }
   resetView();
 
-  // Wheel zoom around cursor
+  // Wheel → X-only zoom around cursor
   view.element.addEventListener('wheel', (evt) => {
     evt.preventDefault();
-    const old = view.zoom;
-    const mouse = new paper.Point(evt.offsetX, evt.offsetY);
-    const worldBefore = view.viewToProject(mouse);
-
+    const mouseX = evt.offsetX;
+    const worldXBefore = screenXToWorld(mouseX);
     const factor = Math.pow(1.0016, -evt.deltaY);
-    setZoom(old * factor);
-
-    const worldAfter = view.viewToProject(mouse);
-    view.center = view.center.add(worldBefore.subtract(worldAfter));
+    setScale(pxPerUnit * factor);
+    panX = mouseX - worldXBefore * pxPerUnit; // keep same world X under cursor
+    draw();
   }, { passive:false });
 
-  // Pan: middle mouse OR hold Space + Left drag
+  // Pan with middle mouse or Shift/Ctrl/⌘ + left drag
+  let panning = false, panStart = null;
   view.element.addEventListener('mousedown', (e)=>{
-    if (e.button === 1 || (e.button===0 && e.shiftKey) || (e.button===0 && e.metaKey) || (e.button===0 && e.ctrlKey) || (e.button===0 && e.code==='Space')) {
-      panning = true; panStart = new paper.Point(e.clientX, e.clientY); document.body.style.cursor='grabbing';
-    }
+    const wantsPan = e.button === 1 || (e.button===0 && (e.shiftKey||e.ctrlKey||e.metaKey));
+    if (wantsPan) { panning = true; panStart = new paper.Point(e.clientX, e.clientY); document.body.style.cursor='grabbing'; }
   });
   window.addEventListener('mousemove', (e)=>{
-    if(!panning) return;
+    if (!panning) return;
     const now = new paper.Point(e.clientX, e.clientY);
-    const delta = panStart.subtract(now).divide(view.zoom);
-    view.center = view.center.add(delta);
+    panX += now.x - panStart.x;
+    panY += now.y - panStart.y;
     panStart = now;
+    draw();
   });
   window.addEventListener('mouseup', ()=>{ panning=false; document.body.style.cursor='default'; });
 
-  // ---------- Parsing & drawing ----------
+  // ---------- Utils ----------
   function parseNumbers(text){
+    // tolerate spaces, newlines, commas, semicolons
     return (text || '')
       .split(/[\s,;]+/)
       .map(s=>s.trim())
-      .filter(s=> s.length>0 && !isNaN(Number(s)))
+      .filter(s => s.length && !isNaN(Number(s)))
       .map(Number);
   }
-
-  // Nice tick spacing (1,2,5 × 10^n)
   function niceStep(targetPx){
-    const unitPx = pxPerUnit * view.zoom; // px per world unit at current zoom
-    const targetUnits = targetPx / unitPx;
-    const pow10 = Math.pow(10, Math.floor(Math.log10(targetUnits)));
-    const candidates = [1,2,5].map(m=> m*pow10);
-    // choose the one >= targetUnits
-    const picked = candidates.find(c=> c>= targetUnits) || 10*pow10;
-    return picked;
+    // choose 1/2/5*10^n that gives ~targetPx in screen
+    const targetUnits = targetPx / pxPerUnit;
+    const pow10 = Math.pow(10, Math.floor(Math.log10(Math.max(targetUnits,1e-9))));
+    const cand = [1,2,5].map(m=>m*pow10);
+    return cand.find(c=>c>=targetUnits) || 10*pow10;
   }
+  const colorAt = (i) => COLORS[i % COLORS.length];
 
-  function colorAt(i){ return COLORS[i % COLORS.length]; }
+  // ---------- Drawing ----------
+  function drawAxis(){
+    const g = new paper.Group();
+    const y0 = 30 + panY;
 
-  function drawAxis(bounds){
-    const group = new paper.Group();
-    const { left, right, top } = bounds;
-    const y0 = top + 30; // place axis near top
+    // baseline
+    g.addChild(new paper.Path.Line({
+      from:[0, y0], to:[view.bounds.width, y0], strokeColor:'#2a3244', strokeWidth:1
+    }));
 
-    // Baseline
-    const baseline = new paper.Path.Line({ from:[left, y0], to:[right, y0], strokeColor:'#2a3244', strokeWidth:1 });
-    group.addChild(baseline);
+    // ticks in world → screen
+    const worldLeft  = screenXToWorld(0);
+    const worldRight = screenXToWorld(view.bounds.width);
+    const step = niceStep(100);
+    const firstTick = Math.floor(worldLeft/step)*step;
 
-    // Ticks & labels
-    const step = niceStep(100); // aim ~100px apart
-    const startUnit = Math.floor((left - view.center.x) / (pxPerUnit) * (1/view.zoom)); // not used; we'll compute differently
-
-    // World x range for current view
-    const worldLeft  = view.viewToProject(new paper.Point(0,0)).x;
-    const worldRight = view.viewToProject(new paper.Point(view.bounds.width,0)).x;
-
-    // Choose tick start as multiple of step
-    const firstTick = Math.floor(worldLeft / step) * step;
     for (let u = firstTick; u <= worldRight; u += step) {
-      const x = u; // world x already (Paper project coords)
-      const p = new paper.Point(x, y0);
-      const t = new paper.Path.Line({ from:[x, y0-6], to:[x, y0+6], strokeColor:'#3a4258', strokeWidth:1 });
-      group.addChild(t);
-      const label = new paper.PointText({ point:[x+3, y0 - 8], content: u.toFixed( (step<1)? 2 : 0), fillColor:'#98a3b7', fontSize:10 });
-      group.addChild(label);
+      const sx = worldXToScreen(u);
+      g.addChild(new paper.Path.Line({ from:[sx, y0-6], to:[sx, y0+6], strokeColor:'#3a4258', strokeWidth:1 }));
+      g.addChild(new paper.PointText({ point:[sx+3, y0-8], content: u.toFixed(step<1?2:0), fillColor:'#98a3b7', fontSize:10 }));
     }
-
-    return group;
+    return g;
   }
 
   function draw(){
-    gridLayer.removeChildren();
-    dataLayer.removeChildren();
-    overlayLayer.removeChildren();
+    paper.project.clear();
 
-    // Helpful info
-    unitInfo.textContent = `Scale: ${Math.round(pxPerUnit)} px / unit`;
+    const gridLayer = new paper.Layer();
+    const dataLayer = new paper.Layer();
 
-    const viewBounds = view.bounds;
+    gridLayer.addChild(drawAxis());
 
-    // Axis
-    const axis = drawAxis(viewBounds);
-    gridLayer.addChild(axis);
-
-    // Draw each track
     const legendLines = [];
 
     tracks.forEach((t, idx) => {
       const nums = parseNumbers(t.dataText);
-      const y = 80 + idx*(ROW_HEIGHT + ROW_GAP);
-
-      // Row baseline & label
+      const y = 80 + panY + idx*(ROW_HEIGHT + ROW_GAP);
       const name = t.name || `Timeline ${idx+1}`;
-      const nameText = new paper.PointText({ point:[view.viewToProject(new paper.Point(16,0)).x, y-18], content: name, fillColor:'#c7d2e8', fontSize:12 });
-      dataLayer.addChild(nameText);
+      dataLayer.addChild(new paper.PointText({ point:[16, y-18], content: name, fillColor:'#c7d2e8', fontSize:12 }));
 
-      // Offset marker
-      const startX = t.offset; // world units
-      const startLine = new paper.Path.Line({ from:[startX, y-10], to:[startX, y+ROW_HEIGHT-10], strokeColor:'#39435c', dashArray:[6,6] });
-      dataLayer.addChild(startLine);
+      // offset marker
+      const startXs = worldXToScreen(t.offset);
+      dataLayer.addChild(new paper.Path.Line({ from:[startXs, y-10], to:[startXs, y+ROW_HEIGHT-10], strokeColor:'#39435c', dashArray:[6,6] }));
 
-      // Spans
-      let acc = startX;
-      const rects = new paper.Group();
+      let acc = t.offset;
       const spanColor = colorAt(idx);
 
-      nums.forEach((len, j) => {
-        const x0 = acc;
-        const x1 = acc + len;
-        const r = new paper.Path.Rectangle({
-          point: [x0, y],
-          size: [len, ROW_HEIGHT-20],
-          fillColor: spanColor,
-          opacity: 0.65,
-          strokeColor: 'white',
-          strokeWidth: 0.6
-        });
-        // boundary marker at x1
-        const m = new paper.Path.Line({ from:[x1, y-2], to:[x1, y+ROW_HEIGHT-18], strokeColor:'#e6edf7', opacity:0.35 });
-        rects.addChildren([r,m]);
-        // small length label
-        if (len >= 1.2) {
-          const lbl = new paper.PointText({ point:[x0 + 0.5*len, y + (ROW_HEIGHT-20)/2 + 4], justification:'center', content: String(len), fillColor:'#0d0f13', fontSize:11 });
-          rects.addChild(lbl);
+      nums.forEach((len) => {
+        const x0s = worldXToScreen(acc);
+        const x1s = worldXToScreen(acc + len);
+        const width = x1s - x0s;
+
+        dataLayer.addChild(new paper.Path.Rectangle({
+          point:[x0s, y], size:[width, ROW_HEIGHT-20],
+          fillColor: spanColor, opacity:0.65, strokeColor:'white', strokeWidth:0.6
+        }));
+        dataLayer.addChild(new paper.Path.Line({ from:[x1s, y-2], to:[x1s, y+ROW_HEIGHT-18], strokeColor:'#e6edf7', opacity:0.35 }));
+
+        if (width >= 50) {
+          dataLayer.addChild(new paper.PointText({
+            point:[x0s + width/2, y + (ROW_HEIGHT-20)/2 + 4],
+            justification:'center', content:String(len), fillColor:'#0d0f13', fontSize:11
+          }));
         }
-        acc = x1;
+        acc += len;
       });
 
-      dataLayer.addChild(rects);
+      // row baseline
+      dataLayer.addChild(new paper.Path.Line({ from:[0, y + (ROW_HEIGHT-20)], to:[view.bounds.width, y + (ROW_HEIGHT-20)], strokeColor:'#222a3a' }));
 
-      // Left baseline line for the track
-      const base = new paper.Path.Line({ from:[-1e6, y + (ROW_HEIGHT-20)], to:[1e6, y + (ROW_HEIGHT-20)], strokeColor:'#222a3a' });
-      dataLayer.addChild(base);
-
-      legendLines.push(`<div><span class="pill" style="border-color:#3a4357">${name}</span> <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${spanColor};margin:0 6px 0 10px"></span> spans: ${nums.length}</div>`);
+      legendLines.push(
+        `<div><span class="pill" style="border-color:#3a4357">${name}</span>`+
+        `<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${spanColor};margin:0 6px 0 10px"></span>`+
+        `spans: ${nums.length}</div>`
+      );
     });
 
     legend.innerHTML = legendLines.join('');
-
     view.update();
   }
 
-  // On resize, redraw (Paper handles canvas resize via resize attr)
   view.onResize = () => draw();
-
-  // Initial render
   draw();
-
 })();
 </script>
+
+
 
 <footer class="footer" style="padding:8px 16px; border-top:1px solid #202430;">
   <div>
