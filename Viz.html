@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Multi--Timeline Visualiser</title>
+  <title>Multi‑Timeline Visualiser</title>
   <style>
     :root { color-scheme: dark; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; background:#0d0f13; color:#dfe6ef; }
@@ -53,10 +53,8 @@
     </main>
   </div>
 
-
 <script>
 (function(){
-  // ---------- UI refs ----------
   const sidebar = document.getElementById('sidebar');
   const addBtn = document.getElementById('addTrack');
   const renderBtn = document.getElementById('render');
@@ -65,20 +63,19 @@
   const unitInfo = document.getElementById('unitInfo');
   const legend = document.getElementById('legend');
 
-  // ---------- Config ----------
   const ROW_HEIGHT = 60;
   const ROW_GAP = 24;
-  const BASE_PX_PER_UNIT = 1;
-  const COLORS = ['#7bdff2','#b2f7ef','#eff7f6','#f7d6e0','#f2b5d4','#82f6a5','#b5e48c','#f9c74f','#f8961e','#f9844a','#90be6d'];
+  const BASE_PX_PER_UNIT = 50;
+  const COLORS = [ '#7bdff2','#b2f7ef','#eff7f6','#f7d6e0','#f2b5d4','#82f6a5','#b5e48c','#f9c74f','#f8961e','#f9844a','#90be6d' ];
 
-  // ---------- Model ----------
   let tracks = [];
   let trackCounter = 1;
 
   function addTrackRow(prefill) {
     const id = `track-${trackCounter++}`;
     const row = document.createElement('div');
-    row.className = 'row'; row.dataset.id = id;
+    row.className = 'row';
+    row.dataset.id = id;
     row.innerHTML = `
       <h3>
         <span>Timeline <span class="pill">#${tracks.length+1}</span></span>
@@ -89,214 +86,79 @@
       <div style="display:grid; grid-template-columns: 1fr 140px; gap:10px; align-items:end;">
         <div>
           <label>Numbers (timespans)</label>
-          <textarea data-text placeholder="Paste numbers separated by spaces, commas, or newlines">${prefill?.dataText || ''}</textarea>
-          <div class="hint">Each number is a span length; rectangles are laid end-to-end. Markers at cumulative boundaries.</div>
+          <textarea data-text>${prefill?.dataText || ''}</textarea>
         </div>
         <div>
           <label>Offset (units)</label>
           <input type="number" step="any" data-offset value="${prefill?.offset ?? 0}">
         </div>
-      </div>
-    `;
-    row.querySelector('[data-remove]').onclick = () => {
-      sidebar.removeChild(row);
-      tracks = tracks.filter(t => t.id !== id);
-      reindexHeaders(); draw();
-    };
+      </div>`;
+    row.querySelector('[data-remove]').onclick = () => { sidebar.removeChild(row); tracks = tracks.filter(t => t.id !== id); reindexHeaders(); draw(); };
     sidebar.appendChild(row);
-
-    tracks.push({ id, name:'', offset:0, dataText:'' });
-
+    tracks.push({ id, name:'', offset:0, dataText:'', panY:0 });
     const nameEl = row.querySelector('[data-name]');
     const textEl = row.querySelector('[data-text]');
     const offEl  = row.querySelector('[data-offset]');
-    function sync() {
-      const t = tracks.find(t => t.id === id);
-      t.name = nameEl.value.trim();
-      t.dataText = textEl.value;
-      t.offset = parseFloat(offEl.value || '0') || 0;
-    }
-    nameEl.addEventListener('input', sync);
-    textEl.addEventListener('input', sync);
-    offEl.addEventListener('input', sync);
-    sync();
+    function sync(){ const t = tracks.find(t => t.id === id); t.name=nameEl.value.trim(); t.dataText=textEl.value; t.offset=parseFloat(offEl.value||'0')||0; }
+    nameEl.addEventListener('input', sync); textEl.addEventListener('input', sync); offEl.addEventListener('input', sync); sync();
   }
-  function reindexHeaders(){
-    [...sidebar.querySelectorAll('.row h3 span .pill')].forEach((el,i)=> el.textContent = `#${i+1}`);
-  }
+  function reindexHeaders(){ [...sidebar.querySelectorAll('.row h3 span .pill')].forEach((el,i)=> el.textContent = `#${i+1}`); }
 
-  // Seed a couple of rows
   addTrackRow({ name:'Dataset A', dataText:'5 2 3.5 1 4 2.2 6', offset:0 });
   addTrackRow({ name:'Dataset B', dataText:'2 2 2 2 2 2 2 2 2 2 2', offset:1.5 });
-
-  addBtn.onclick   = () => addTrackRow();
+  addBtn.onclick = () => addTrackRow();
   renderBtn.onclick = () => draw();
-  resetBtn.onclick  = () => { resetView(); draw(); };
+  resetBtn.onclick = () => { resetView(); draw(); };
 
-  // ---------- Paper.js ----------
   paper.setup('stage');
   const view = paper.view;
-  view.zoom = 1; // keep fixed; we will scale X ourselves
-
-  // ---------- Camera (X-only zoom) ----------
-  let pxPerUnit = BASE_PX_PER_UNIT; // horizontal scale (px / unit)
-  let panX = 100;                   // pixel pan X
-  let panY = 0;                     // pixel pan Y (vertical stack offset)
-  const minScale = 0.0005, maxScale = 20;
+  let pxPerUnit = BASE_PX_PER_UNIT;
+  let panX = 100;
+  let minScale = 0.0005, maxScale = 800;
 
   const worldXToScreen = (wx) => panX + wx * pxPerUnit;
   const screenXToWorld = (sx) => (sx - panX) / pxPerUnit;
 
-  function setScale(v){
-    pxPerUnit = Math.max(minScale, Math.min(maxScale, v));
-    zoomInfo.textContent = `Zoom: ${Math.round(pxPerUnit/BASE_PX_PER_UNIT*100)}%`;
-    unitInfo.textContent = `Scale: ${Math.round(pxPerUnit * 10000)/10000} px / unit`;
-  }
-  function resetView(){
-    setScale(BASE_PX_PER_UNIT);
-    panX = 100; panY = 0;
-  }
+  function setScale(v){ pxPerUnit = Math.max(minScale, Math.min(maxScale, v)); zoomInfo.textContent = `Zoom: ${Math.round(pxPerUnit/BASE_PX_PER_UNIT*100)}%`; unitInfo.textContent = `Scale: ${pxPerUnit.toFixed(5)} px / unit`; }
+  function resetView(){ setScale(BASE_PX_PER_UNIT); panX=100; tracks.forEach(t=>t.panY=0); }
   resetView();
 
-  // Wheel → X-only zoom around cursor
-  view.element.addEventListener('wheel', (evt) => {
-    evt.preventDefault();
-    const mouseX = evt.offsetX;
-    const worldXBefore = screenXToWorld(mouseX);
-    const factor = Math.pow(1.0016, -evt.deltaY);
-    setScale(pxPerUnit * factor);
-    panX = mouseX - worldXBefore * pxPerUnit; // keep same world X under cursor
-    draw();
-  }, { passive:false });
+  view.element.addEventListener('wheel', (evt) => { evt.preventDefault(); const mouseX=evt.offsetX; const worldXBefore=screenXToWorld(mouseX); const factor=Math.pow(1.0016,-evt.deltaY); setScale(pxPerUnit*factor); panX = mouseX - worldXBefore*pxPerUnit; draw(); }, { passive:false });
 
-  // Pan with middle mouse or Shift/Ctrl/⌘ + left drag
-  let panning = false, panStart = null;
-  view.element.addEventListener('mousedown', (e)=>{
-    const wantsPan = e.button === 1 || (e.button===0 && (e.shiftKey||e.ctrlKey||e.metaKey));
-    if (wantsPan) { panning = true; panStart = new paper.Point(e.clientX, e.clientY); document.body.style.cursor='grabbing'; }
-  });
-  window.addEventListener('mousemove', (e)=>{
-    if (!panning) return;
-    const now = new paper.Point(e.clientX, e.clientY);
-    panX += now.x - panStart.x;
-    panY += now.y - panStart.y;
-    panStart = now;
-    draw();
-  });
-  window.addEventListener('mouseup', ()=>{ panning=false; document.body.style.cursor='default'; });
-
-  // ---------- Utils ----------
-  function parseNumbers(text){
-    // tolerate spaces, newlines, commas, semicolons
-    return (text || '')
-      .split(/[\s,;]+/)
-      .map(s=>s.trim())
-      .filter(s => s.length && !isNaN(Number(s)))
-      .map(Number);
-  }
-  function niceStep(targetPx){
-    // choose 1/2/5*10^n that gives ~targetPx in screen
-    const targetUnits = targetPx / pxPerUnit;
-    const pow10 = Math.pow(10, Math.floor(Math.log10(Math.max(targetUnits,1e-9))));
-    const cand = [1,2,5].map(m=>m*pow10);
-    return cand.find(c=>c>=targetUnits) || 10*pow10;
-  }
-  const colorAt = (i) => COLORS[i % COLORS.length];
-
-  // ---------- Drawing ----------
-  function drawAxis(){
-    const g = new paper.Group();
-    const y0 = 30 + panY;
-
-    // baseline
-    g.addChild(new paper.Path.Line({
-      from:[0, y0], to:[view.bounds.width, y0], strokeColor:'#2a3244', strokeWidth:1
-    }));
-
-    // ticks in world → screen
-    const worldLeft  = screenXToWorld(0);
-    const worldRight = screenXToWorld(view.bounds.width);
-    const step = niceStep(100);
-    const firstTick = Math.floor(worldLeft/step)*step;
-
-    for (let u = firstTick; u <= worldRight; u += step) {
-      const sx = worldXToScreen(u);
-      g.addChild(new paper.Path.Line({ from:[sx, y0-6], to:[sx, y0+6], strokeColor:'#3a4258', strokeWidth:1 }));
-      g.addChild(new paper.PointText({ point:[sx+3, y0-8], content: u.toFixed(step<1?2:0), fillColor:'#98a3b7', fontSize:10 }));
-    }
-    return g;
-  }
-
-  function draw(){
-    paper.project.clear();
-
-    const gridLayer = new paper.Layer();
-    const dataLayer = new paper.Layer();
-
-    gridLayer.addChild(drawAxis());
-
-    const legendLines = [];
-
-    tracks.forEach((t, idx) => {
-      const nums = parseNumbers(t.dataText);
-      const y = 80 + panY + idx*(ROW_HEIGHT + ROW_GAP);
-      const name = t.name || `Timeline ${idx+1}`;
-      dataLayer.addChild(new paper.PointText({ point:[16, y-18], content: name, fillColor:'#c7d2e8', fontSize:12 }));
-
-      // offset marker
-      const startXs = worldXToScreen(t.offset);
-      dataLayer.addChild(new paper.Path.Line({ from:[startXs, y-10], to:[startXs, y+ROW_HEIGHT-10], strokeColor:'#39435c', dashArray:[6,6] }));
-
-      let acc = t.offset;
-      const spanColor = colorAt(idx);
-
-      nums.forEach((len) => {
-        const x0s = worldXToScreen(acc);
-        const x1s = worldXToScreen(acc + len);
-        const width = x1s - x0s;
-
-        dataLayer.addChild(new paper.Path.Rectangle({
-          point:[x0s, y], size:[width, ROW_HEIGHT-20],
-          fillColor: spanColor, opacity:0.65, strokeColor:'white', strokeWidth:0.6
-        }));
-        dataLayer.addChild(new paper.Path.Line({ from:[x1s, y-2], to:[x1s, y+ROW_HEIGHT-18], strokeColor:'#e6edf7', opacity:0.35 }));
-
-        if (width >= 50) {
-          dataLayer.addChild(new paper.PointText({
-            point:[x0s + width/2, y + (ROW_HEIGHT-20)/2 + 4],
-            justification:'center', content:String(len), fillColor:'#0d0f13', fontSize:11
-          }));
-        }
-        acc += len;
+  // Per-track dragging (vertical)
+  let draggingTrack=null; let dragStartY=0;
+  view.element.addEventListener('mousedown',(e)=>{
+    if(e.button===0){ // left button
+      const y=e.offsetY; // find track index by vertical slot
+      tracks.forEach((t,idx)=>{
+        const ty = 80 + idx*(ROW_HEIGHT+ROW_GAP) + t.panY;
+        if(y>=ty && y<=ty+ROW_HEIGHT){ draggingTrack=t; dragStartY=y - t.panY; }
       });
+    }
+  });
+  view.element.addEventListener('mousemove',(e)=>{
+    if(draggingTrack){ draggingTrack.panY = e.offsetY - dragStartY; draw(); }
+  });
+  window.addEventListener('mouseup',()=>{ draggingTrack=null; });
 
-      // row baseline
-      dataLayer.addChild(new paper.Path.Line({ from:[0, y + (ROW_HEIGHT-20)], to:[view.bounds.width, y + (ROW_HEIGHT-20)], strokeColor:'#222a3a' }));
+  function parseNumbers(text){ return (text||'').split(/[\s,;]+/).map(s=>s.trim()).filter(s=>s.length>0 && !isNaN(Number(s))).map(Number); }
+  function niceStep(targetPx){ const targetUnits=targetPx/pxPerUnit; const pow10=Math.pow(10,Math.floor(Math.log10(Math.max(targetUnits,1e-9)))); const cand=[1,2,5].map(m=>m*pow10); return cand.find(c=>c>=targetUnits)||10*pow10; }
 
-      legendLines.push(
-        `<div><span class="pill" style="border-color:#3a4357">${name}</span>`+
-        `<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${spanColor};margin:0 6px 0 10px"></span>`+
-        `spans: ${nums.length}</div>`
-      );
-    });
+  function drawAxis(){ const g=new paper.Group(); const y0=30; g.addChild(new paper.Path.Line({from:[0,y0],to:[view.bounds.width,y0],strokeColor:'#2a3244',strokeWidth:1})); const worldLeft=screenXToWorld(0); const worldRight=screenXToWorld(view.bounds.width); const step=niceStep(100); const firstTick=Math.floor(worldLeft/step)*step; for(let u=firstTick;u<=worldRight;u+=step){ const sx=worldXToScreen(u); g.addChild(new paper.Path.Line({from:[sx,y0-6],to:[sx,y0+6],strokeColor:'#3a4258',strokeWidth:1})); g.addChild(new paper.PointText({point:[sx+3,y0-8],content:u.toFixed(step<1?2:0),fillColor:'#98a3b7',fontSize:10})); } return g; }
 
-    legend.innerHTML = legendLines.join('');
-    view.update();
-  }
+  function draw(){ paper.project.clear(); const gridLayer=new paper.Layer(); const dataLayer=new paper.Layer(); gridLayer.addChild(drawAxis()); const legendLines=[]; tracks.forEach((t,idx)=>{ const nums=parseNumbers(t.dataText); const baseY=80+idx*(ROW_HEIGHT+ROW_GAP)+t.panY; const name=t.name||`Timeline ${idx+1}`; dataLayer.addChild(new paper.PointText({point:[16,baseY-18],content:name,fillColor:'#c7d2e8',fontSize:12})); const startXs=worldXToScreen(t.offset); dataLayer.addChild(new paper.Path.Line({from:[startXs,baseY-10],to:[startXs,baseY+ROW_HEIGHT-10],strokeColor:'#39435c',dashArray:[6,6]})); let acc=t.offset; nums.forEach((len,j)=>{ const x0s=worldXToScreen(acc); const x1s=worldXToScreen(acc+len); const width=x1s-x0s; const color=(j%2===0? '#4fc3f7':'#ffb74d'); dataLayer.addChild(new paper.Path.Rectangle({point:[x0s,baseY],size:[width,ROW_HEIGHT-20],fillColor:color,opacity:0.65,strokeColor:'white',strokeWidth:0.6})); dataLayer.addChild(new paper.Path.Line({from:[x1s,baseY-2],to:[x1s,baseY+ROW_HEIGHT-18],strokeColor:'#e6edf7',opacity:0.35})); if(width>=50){ dataLayer.addChild(new paper.PointText({point:[x0s+width/2,baseY+(ROW_HEIGHT-20)/2+4],justification:'center',content:String(len),fillColor:'#0d0f13',fontSize:11})); } acc+=len; }); dataLayer.addChild(new paper.Path.Line({from:[0,baseY+(ROW_HEIGHT-20)],to:[view.bounds.width,baseY+(ROW_HEIGHT-20)],strokeColor:'#222a3a'})); legendLines.push(`<div><span class="pill">${name}</span> spans: ${nums.length}</div>`); }); legend.innerHTML=legendLines.join(''); view.update(); }
 
-  view.onResize = () => draw();
+  view.onResize=()=>draw();
   draw();
 })();
 </script>
 
-
-
 <footer class="footer" style="padding:8px 16px; border-top:1px solid #202430;">
   <div>
     <strong>Tips:</strong>
-    <span class="kbd">Wheel</span> to zoom (around cursor),
-    <span class="kbd">Middle‑drag</span> or <span class="kbd">Shift/Ctrl/⌘ + Drag</span> to pan,
-    <span class="kbd">Reset View</span> if you get lost. Offsets shift track start in same units.
+    <span class="kbd">Wheel</span> to zoom horizontally,
+    <span class="kbd">Drag track</span> to move it up/down,
+    <span class="kbd">Reset View</span> if you get lost.
   </div>
 </footer>
 
