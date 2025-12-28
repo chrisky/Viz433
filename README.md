@@ -11,7 +11,7 @@ Since 433 MHz pulse data typically repeats, it can be a little challenging to id
 
 ## Usage
 
-View the web page in a recent browser. E.g. click [here]()
+View the web page in a recent browser. E.g. click [here](https://github.com/chrisky/Viz433/blob/main/Viz.html), save the single html to your downloads, and view it in a recent browser.
 <img width="1130" height="1132" alt="image" src="https://github.com/user-attachments/assets/f08d26f3-7929-4d02-bc25-df35602e23bf" />
 
 Paste in some numbers from the log captured by the rfxcomm unit, as seen in RFXmngr.exe.
@@ -22,12 +22,12 @@ Paste them twice.
 
 Drag the bars and zoom and identify the corellations.
 
-You can now identify the numbers that form the pilot sequences and payload.
+You can now identify the numbers that form the pilot sequences, pauses and payload.
 
 Once you've identified and edited the numbers, enter them in their own timeline and see if this is a good match:
 <img width="1677" height="283" alt="image" src="https://github.com/user-attachments/assets/f63a8372-ba05-4ec7-a5c9-73975fe49c13" />
 
-If all goes well, you now have a sequence that can be included per the instructions on the RFXcom help site for use e.g. in Home Assistant.  See the RFXcom downloads page [HERE](http://rfxcom.com/downloads.htm), and the info is in Chapter 18  *Receive and Transmit RAW data*.
+If all goes well, you now have a sequence that can be included per the instructions on the RFXcom help site for use e.g. in Home Assistant.  See the RFXcom downloads page [HERE](http://rfxcom.com/downloads.htm), and the info is in *RFX User Guide*, Chapter 18  *Receive and Transmit RAW data*.
 
 Good luck!
 
