@@ -1,9 +1,9 @@
 ## Introduction
 Viz433 is a simple visualiser for timed data, e.g. a series of numbers that represent pulse time spans.  
 
-The initial purpose was to visualise caputures from the [RFXcom](http://rfxcom.com/) 433 MHz to USB transciever, although this project is in no way affilliated with RFXcom.  I do like their procucts, though.
+The initial purpose was to visualise caputures from the [RFXcom](http://rfxcom.com/) 433 MHz to USB transciever, although this project is in no way affilliated with RFXcom.  And nor am I.  I do rather like their procucts, though.
 
-Viz433 a single HtML page, relying on the Paper.js framework for some of the graphics.
+Viz433 a single HtML page, relying on the Paper.js framework for some of the graphics.  Some AI was used in its generation.
 
 This is ble to show time series captured from that device, as presented in the logs of the RFXmngr.exe application.  
 
