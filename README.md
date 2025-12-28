@@ -13,7 +13,7 @@ View the web page in a recent browser. E.g. click [here]()
 <img width="1130" height="1132" alt="image" src="https://github.com/user-attachments/assets/f08d26f3-7929-4d02-bc25-df35602e23bf" />
 
 Paste in some numbers from the log captured by the rfxcomm unit, as seen in RFXmngr.exe.
-<img width="358" height="198" alt="image" src="https://github.com/user-attachments/assets/af93726b-1808-4bcf-a547-bd8991445a2d" />
+<img width="983" height="539" alt="image" src="https://github.com/user-attachments/assets/bd6c7b70-573b-4365-8b14-4625d7550f93" />
 
 
 
